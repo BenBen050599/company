@@ -120,6 +120,63 @@ button:active {
   font-size: 12px;
 }
 
+/* 使用提示 */
+.hint-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.hint-card h3 {
+  margin-top: 0;
+}
+
+.hint-card p {
+  margin: 8px 0;
+}
+
+.hint-card strong {
+  color: #ffd700;
+}
+
+/* 评论 */
+.comments-section {
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 15px;
+  padding: 10px;
+  background: #f9f9f9;
+  border-radius: 8px;
+}
+
+.comment-item {
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+}
+
+.comment-item:last-child {
+  border-bottom: none;
+}
+
+.comment-item p {
+  margin: 0 0 5px 0;
+}
+
+.comment-item small {
+  color: #999;
+}
+
+.comment-form {
+  display: flex;
+  gap: 10px;
+}
+
+.comment-form input {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
 .file-list {
   display: grid;
   gap: 15px;

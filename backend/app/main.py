@@ -317,15 +317,28 @@ def create_comment(
     return db_comment
 
 
-@app.get("/api/files/{file_id}/comments", response_model=list[CommentResponse])
+@app.get("/api/files/{file_id}/comments")
 def get_file_comments(
     file_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取文件的所有评论"""
+    """获取文件的所有评论（包含作者信息）"""
     comments = db.query(Comment).filter(Comment.file_id == file_id).all()
-    return comments
+    result = []
+    for c in comments:
+        author = db.query(User).filter(User.id == c.author_id).first()
+        result.append({
+            "id": c.id,
+            "content": c.content,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "author": {
+                "id": author.id if author else None,
+                "username": author.username if author else "Unknown",
+                "full_name": author.full_name if author else "Unknown"
+            }
+        })
+    return result
 
 
 # ── 健康检查 ──────────────────────────────────────

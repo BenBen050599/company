@@ -402,8 +402,18 @@ function App() {
             ) : (
               comments.map(comment => (
                 <div key={comment.id} className="comment-item">
-                  <p>{comment.content}</p>
-                  <small>{new Date(comment.created_at).toLocaleString('zh-CN')}</small>
+                  <div className="comment-header">
+                    <div className="avatar">
+                      {comment.author?.full_name?.charAt(0) || '?'}
+                    </div>
+                    <div className="comment-meta">
+                      <span className="author-name">{comment.author?.full_name || 'Unknown'}</span>
+                      <span className="comment-time">
+                        {new Date(comment.created_at).toLocaleString('zh-CN')}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="comment-content">{comment.content}</p>
                 </div>
               ))
             )}

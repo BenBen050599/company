@@ -1,0 +1,205 @@
+import { useState, useEffect } from 'react'
+import './App.css'
+
+const API_URL = 'http://localhost:8000'
+
+function App() {
+  const [token, setToken] = useState(localStorage.getItem('token'))
+  const [apiKey, setApiKey] = useState(localStorage.getItem('apiKey'))
+  const [files, setFiles] = useState([])
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [user, setUser] = useState(null)
+
+  // 获取公开文件列表
+  useEffect(() => {
+    fetch(`${API_URL}/api/files/public`)
+      .then(res => res.json())
+      .then(data => setFiles(data))
+      .catch(err => console.error('获取文件失败:', err))
+  }, [])
+
+  // 登录
+  const handleLogin = async (e) => {
+    e.preventDefault()
+    const formData = new FormData()
+    formData.append('username', username)
+    formData.append('password', password)
+
+    const res = await fetch(`${API_URL}/api/users/login`, {
+      method: 'POST',
+      body: formData
+    })
+    const data = await res.json()
+    
+    if (data.access_token) {
+      localStorage.setItem('token', data.access_token)
+      setToken(data.access_token)
+      // 获取用户信息
+      const userRes = await fetch(`${API_URL}/api/users/me`, {
+        headers: { 'Authorization': `Bearer ${data.access_token}` }
+      })
+      const userData = await userRes.json()
+      setUser(userData)
+    } else {
+      alert('登录失败: ' + (data.detail || '未知错误'))
+    }
+  }
+
+  // 生成 API Key
+  const handleGenerateApiKey = async () => {
+    const res = await fetch(`${API_URL}/api/users/me/api-key`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    const data = await res.json()
+    if (data.api_key) {
+      setApiKey(data.api_key)
+      localStorage.setItem('apiKey', data.api_key)
+      alert('API Key: ' + data.api_key)
+    }
+  }
+
+  // 上传文件
+  const handleUpload = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('description', '网页上传')
+    formData.append('tags', 'web')
+
+    const res = await fetch(`${API_URL}/api/files/upload`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: formData
+    })
+
+    if (res.ok) {
+      alert('上传成功！')
+      // 刷新文件列表
+      const filesRes = await fetch(`${API_URL}/api/files/public`)
+      const filesData = await filesRes.json()
+      setFiles(filesData)
+    } else {
+      alert('上传失败')
+    }
+  }
+
+  // 下载文件
+  const handleDownload = async (fileId, filename) => {
+    const res = await fetch(`${API_URL}/api/files/${fileId}/download`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    const blob = await res.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+  }
+
+  return (
+    <div className="container">
+      <h1>🏢 Company 团队协作平台</h1>
+      
+      {/* 登录区域 */}
+      {!token ? (
+        <div className="card">
+          <h2>登录</h2>
+          <form onSubmit={handleLogin}>
+            <input
+              type="text"
+              placeholder="用户名"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              required
+            />
+            <input
+              type="password"
+              placeholder="密码"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+            />
+            <button type="submit">登录</button>
+          </form>
+        </div>
+      ) : (
+        <div className="card">
+          <h2>欢迎, {user?.full_name || username}!</h2>
+          <div className="actions">
+            <label className="upload-btn">
+              📁 上传文件
+              <input type="file" onChange={handleUpload} hidden />
+            </label>
+            <button onClick={handleGenerateApiKey}>🔑 生成 API Key</button>
+            <button onClick={() => {
+              localStorage.removeItem('token')
+              setToken(null)
+              setUser(null)
+            }}>登出</button>
+          </div>
+          {apiKey && (
+            <div className="api-key">
+              <strong>你的 API Key:</strong>
+              <code>{apiKey}</code>
+              <small>（用于 QClaw 集成）</small>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 文件列表 */}
+      <div className="card">
+        <h2>📂 文件列表 ({files.length})</h2>
+        <div className="file-list">
+          {files.map(file => (
+            <div key={file.id} className="file-item">
+              <div className="file-info">
+                <span className="filename">📄 {file.filename}</span>
+                <span className="size">{(file.file_size / 1024).toFixed(2)} KB</span>
+              </div>
+              {file.description && (
+                <p className="description">{file.description}</p>
+              )}
+              {file.tags && (
+                <div className="tags">
+                  {file.tags.split(',').map((tag, i) => (
+                    <span key={i} className="tag">{tag}</span>
+                  ))}
+                </div>
+              )}
+              <div className="file-actions">
+                <button onClick={() => handleDownload(file.id, file.filename)}>
+                  ⬇️ 下载
+                </button>
+                <span className="date">
+                  {new Date(file.created_at).toLocaleString('zh-CN')}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* API 说明 */}
+      <div className="card">
+        <h2>🔧 QClaw 集成说明</h2>
+        <p>1. 登录后点击"生成 API Key"</p>
+        <p>2. 复制 API Key 到 QClaw 配置</p>
+        <p>3. QClaw 即可访问和上传文件</p>
+        <pre>
+{`# QClaw 使用示例
+curl -X POST http://localhost:8000/api/files/upload-by-api-key \\
+  -H "X-API-Key: YOUR_API_KEY" \\
+  -F "file=@file.txt" \\
+  -F "description=描述"`}
+        </pre>
+      </div>
+    </div>
+  )
+}
+
+export default App

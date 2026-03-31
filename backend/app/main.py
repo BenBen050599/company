@@ -2,7 +2,7 @@
 Company — 团队协作平台
 FastAPI 主应用
 """
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -21,6 +21,7 @@ from .auth import (
     get_password_hash, verify_password, create_access_token,
     get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES
 )
+from .api_key import generate_api_key, get_user_by_api_key
 
 # 初始化应用
 app = FastAPI(title="Company", description="团队协作平台")
@@ -125,6 +126,13 @@ async def upload_file(
     return db_file
 
 
+@app.get("/api/files/public")
+def list_public_files(db: Session = Depends(get_db)):
+    """公开文件列表（无需登录）"""
+    files = db.query(FileModel).all()
+    return files
+
+
 @app.get("/api/files", response_model=list[FileResponse])
 def list_files(
     current_user: User = Depends(get_current_user),
@@ -222,6 +230,59 @@ def get_file_comments(
     """获取文件的所有评论"""
     comments = db.query(Comment).filter(Comment.file_id == file_id).all()
     return comments
+
+
+# ── API Key 管理（QClaw 集成）────────────────────
+
+@app.post("/api/users/me/api-key")
+def generate_api_key_endpoint(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """生成用户的 API Key（用于 QClaw 集成）"""
+    from .api_key import generate_api_key
+    
+    if current_user.api_key:
+        return {"api_key": current_user.api_key, "message": "You already have an API Key"}
+    
+    api_key = generate_api_key()
+    current_user.api_key = api_key
+    db.commit()
+    
+    return {"api_key": api_key, "message": "API Key generated. Keep it safe!"}
+
+
+@app.post("/api/files/upload-by-api-key", response_model=FileResponse)
+async def upload_file_by_api_key(
+    file: UploadFile = File(...),
+    description: str = Form(default=""),
+    tags: str = Form(default=""),
+    current_user: User = Depends(get_user_by_api_key),
+    db: Session = Depends(get_db)
+):
+    """通过 API Key 上传文件（QClaw 专用）"""
+    # 保存文件
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    file_size = os.path.getsize(file_path)
+    file_type = file.content_type or "unknown"
+    
+    db_file = FileModel(
+        filename=file.filename,
+        description=description,
+        file_path=file_path,
+        file_size=file_size,
+        file_type=file_type,
+        tags=tags,
+        owner_id=current_user.id
+    )
+    db.add(db_file)
+    db.commit()
+    db.refresh(db_file)
+    
+    return db_file
 
 
 # ── 健康检查 ──────────────────────────────────────

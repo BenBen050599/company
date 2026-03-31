@@ -18,6 +18,8 @@ class User(Base):
     hashed_password = Column(String)
     full_name = Column(String)
     is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False)
+    api_key = Column(String, unique=True, index=True, nullable=True)  # API Key for QClaw
     created_at = Column(DateTime, default=datetime.utcnow)
     
     files = relationship("File", back_populates="owner")

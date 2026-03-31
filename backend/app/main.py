@@ -2,14 +2,13 @@
 Company — 团队协作平台
 FastAPI 主应用
 """
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Security
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Security, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta
 import os
 import shutil
+from typing import Optional
 
 from .database import get_db, init_db
 from .models import User, File as FileModel, Comment
@@ -250,6 +249,75 @@ def generate_api_key_endpoint(
     db.commit()
     
     return {"api_key": api_key, "message": "API Key generated. Keep it safe!"}
+
+
+# ── 管理员功能 ─────────────────────────────────────
+
+@app.get("/api/admin/users")
+def list_all_users(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """列出所有用户（仅管理员）"""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    users = db.query(User).all()
+    return [
+        {
+            "id": u.id,
+            "username": u.username,
+            "email": u.email,
+            "full_name": u.full_name,
+            "is_admin": u.is_admin,
+            "is_active": u.is_active,
+            "created_at": u.created_at.isoformat()
+        }
+        for u in users
+    ]
+
+
+@app.delete("/api/admin/users/{user_id}")
+def delete_user(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """删除用户（仅管理员）"""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    
+    if user.is_admin:
+        raise HTTPException(status_code=400, detail="不能删除管理员")
+    
+    db.delete(user)
+    db.commit()
+    
+    return {"message": "用户已删除"}
+
+
+@app.post("/api/admin/users/{user_id}/toggle-admin")
+def toggle_admin(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """切换用户管理员权限（仅管理员）"""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    
+    user.is_admin = not user.is_admin
+    db.commit()
+    
+    return {"message": f"用户 {'已成为' if user.is_admin else '已取消'} 管理员"}
 
 
 @app.post("/api/files/upload-by-api-key", response_model=FileResponse)

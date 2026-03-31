@@ -9,7 +9,12 @@ function App() {
   const [files, setFiles] = useState([])
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [email, setEmail] = useState('')
+  const [fullName, setFullName] = useState('')
   const [user, setUser] = useState(null)
+  const [showRegister, setShowRegister] = useState(false)
+  const [users, setUsers] = useState([])
+  const [showAdmin, setShowAdmin] = useState(false)
 
   // 获取公开文件列表
   useEffect(() => {
@@ -18,6 +23,21 @@ function App() {
       .then(data => setFiles(data))
       .catch(err => console.error('获取文件失败:', err))
   }, [])
+
+  // 获取用户信息
+  useEffect(() => {
+    if (token) {
+      fetch(`${API_URL}/api/users/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => setUser(data))
+        .catch(() => {
+          localStorage.removeItem('token')
+          setToken(null)
+        })
+    }
+  }, [token])
 
   // 登录
   const handleLogin = async (e) => {
@@ -35,14 +55,37 @@ function App() {
     if (data.access_token) {
       localStorage.setItem('token', data.access_token)
       setToken(data.access_token)
-      // 获取用户信息
-      const userRes = await fetch(`${API_URL}/api/users/me`, {
-        headers: { 'Authorization': `Bearer ${data.access_token}` }
-      })
-      const userData = await userRes.json()
-      setUser(userData)
+      setUsername('')
+      setPassword('')
     } else {
       alert('登录失败: ' + (data.detail || '未知错误'))
+    }
+  }
+
+  // 注册
+  const handleRegister = async (e) => {
+    e.preventDefault()
+    const res = await fetch(`${API_URL}/api/users/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username,
+        email,
+        full_name: fullName,
+        password
+      })
+    })
+    const data = await res.json()
+    
+    if (data.id) {
+      alert('注册成功！请登录')
+      setShowRegister(false)
+      setUsername('')
+      setPassword('')
+      setEmail('')
+      setFullName('')
+    } else {
+      alert('注册失败: ' + (data.detail || '未知错误'))
     }
   }
 
@@ -56,7 +99,31 @@ function App() {
     if (data.api_key) {
       setApiKey(data.api_key)
       localStorage.setItem('apiKey', data.api_key)
-      alert('API Key: ' + data.api_key)
+    }
+  }
+
+  // 获取所有用户（管理员）
+  const loadUsers = async () => {
+    const res = await fetch(`${API_URL}/api/admin/users`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (res.ok) {
+      const data = await res.json()
+      setUsers(data)
+    }
+  }
+
+  // 删除用户（管理员）
+  const handleDeleteUser = async (userId) => {
+    if (!confirm('确定删除此用户？')) return
+    
+    const res = await fetch(`${API_URL}/api/admin/users/${userId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (res.ok) {
+      alert('用户已删除')
+      loadUsers()
     }
   }
 
@@ -78,7 +145,6 @@ function App() {
 
     if (res.ok) {
       alert('上传成功！')
-      // 刷新文件列表
       const filesRes = await fetch(`${API_URL}/api/files/public`)
       const filesData = await filesRes.json()
       setFiles(filesData)
@@ -104,37 +170,90 @@ function App() {
     <div className="container">
       <h1>🏢 Company 团队协作平台</h1>
       
-      {/* 登录区域 */}
+      {/* 登录/注册区域 */}
       {!token ? (
         <div className="card">
-          <h2>登录</h2>
-          <form onSubmit={handleLogin}>
-            <input
-              type="text"
-              placeholder="用户名"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
-              required
-            />
-            <input
-              type="password"
-              placeholder="密码"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              required
-            />
-            <button type="submit">登录</button>
-          </form>
+          {showRegister ? (
+            <>
+              <h2>注册新账户</h2>
+              <form onSubmit={handleRegister}>
+                <input
+                  type="text"
+                  placeholder="用户名"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  required
+                />
+                <input
+                  type="email"
+                  placeholder="邮箱"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="姓名"
+                  value={fullName}
+                  onChange={e => setFullName(e.target.value)}
+                  required
+                />
+                <input
+                  type="password"
+                  placeholder="密码"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  required
+                />
+                <button type="submit">注册</button>
+                <button type="button" onClick={() => setShowRegister(false)} className="secondary">
+                  返回登录
+                </button>
+              </form>
+            </>
+          ) : (
+            <>
+              <h2>登录</h2>
+              <form onSubmit={handleLogin}>
+                <input
+                  type="text"
+                  placeholder="用户名"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  required
+                />
+                <input
+                  type="password"
+                  placeholder="密码"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  required
+                />
+                <button type="submit">登录</button>
+                <button type="button" onClick={() => setShowRegister(true)} className="secondary">
+                  注册新账户
+                </button>
+              </form>
+            </>
+          )}
         </div>
       ) : (
         <div className="card">
-          <h2>欢迎, {user?.full_name || username}!</h2>
+          <h2>欢迎, {user?.full_name || username}! {user?.is_admin && '👑'}</h2>
           <div className="actions">
             <label className="upload-btn">
               📁 上传文件
               <input type="file" onChange={handleUpload} hidden />
             </label>
             <button onClick={handleGenerateApiKey}>🔑 生成 API Key</button>
+            {user?.is_admin && (
+              <button onClick={() => {
+                setShowAdmin(!showAdmin)
+                if (!showAdmin) loadUsers()
+              }} className="admin-btn">
+                👥 管理用户
+              </button>
+            )}
             <button onClick={() => {
               localStorage.removeItem('token')
               setToken(null)
@@ -151,36 +270,67 @@ function App() {
         </div>
       )}
 
+      {/* 管理员面板 */}
+      {showAdmin && user?.is_admin && (
+        <div className="card">
+          <h2>👥 用户管理</h2>
+          <div className="user-list">
+            {users.map(u => (
+              <div key={u.id} className="user-item">
+                <div>
+                  <strong>{u.full_name}</strong> ({u.username})
+                  <br />
+                  <small>{u.email}</small>
+                  {u.is_admin && <span className="badge">管理员</span>}
+                </div>
+                {!u.is_admin && (
+                  <button 
+                    onClick={() => handleDeleteUser(u.id)}
+                    className="delete-btn"
+                  >
+                    删除
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 文件列表 */}
       <div className="card">
         <h2>📂 文件列表 ({files.length})</h2>
         <div className="file-list">
-          {files.map(file => (
-            <div key={file.id} className="file-item">
-              <div className="file-info">
-                <span className="filename">📄 {file.filename}</span>
-                <span className="size">{(file.file_size / 1024).toFixed(2)} KB</span>
-              </div>
-              {file.description && (
-                <p className="description">{file.description}</p>
-              )}
-              {file.tags && (
-                <div className="tags">
-                  {file.tags.split(',').map((tag, i) => (
-                    <span key={i} className="tag">{tag}</span>
-                  ))}
+          {files.length === 0 ? (
+            <p style={{color: '#999', textAlign: 'center'}}>暂无文件</p>
+          ) : (
+            files.map(file => (
+              <div key={file.id} className="file-item">
+                <div className="file-info">
+                  <span className="filename">📄 {file.filename}</span>
+                  <span className="size">{(file.file_size / 1024).toFixed(2)} KB</span>
                 </div>
-              )}
-              <div className="file-actions">
-                <button onClick={() => handleDownload(file.id, file.filename)}>
-                  ⬇️ 下载
-                </button>
-                <span className="date">
-                  {new Date(file.created_at).toLocaleString('zh-CN')}
-                </span>
+                {file.description && (
+                  <p className="description">{file.description}</p>
+                )}
+                {file.tags && (
+                  <div className="tags">
+                    {file.tags.split(',').map((tag, i) => (
+                      <span key={i} className="tag">{tag}</span>
+                    ))}
+                  </div>
+                )}
+                <div className="file-actions">
+                  <button onClick={() => handleDownload(file.id, file.filename)}>
+                    ⬇️ 下载
+                  </button>
+                  <span className="date">
+                    {new Date(file.created_at).toLocaleString('zh-CN')}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
 

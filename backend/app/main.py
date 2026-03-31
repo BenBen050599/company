@@ -3,12 +3,13 @@ Company — 团队协作平台
 FastAPI 主应用
 """
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Security, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from datetime import timedelta
 import os
 import shutil
-from typing import Optional
 
 from .database import get_db, init_db
 from .models import User, File as FileModel, Comment
@@ -88,42 +89,72 @@ def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
-# ── 文件相关 ──────────────────────────────────────
-
-@app.post("/api/files/upload", response_model=FileResponse)
-async def upload_file(
-    file: UploadFile = File(...),
-    description: str = Form(default=""),
-    tags: str = Form(default=""),
+@app.post("/api/users/me/api-key")
+def generate_api_key_endpoint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """上传文件"""
-    # 保存文件
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    """生成用户的 API Key（用于 QClaw 集成）"""
+    if current_user.api_key:
+        return {"api_key": current_user.api_key, "message": "You already have an API Key"}
     
-    # 获取文件大小和类型
-    file_size = os.path.getsize(file_path)
-    file_type = file.content_type or "unknown"
-    
-    # 保存到数据库
-    db_file = FileModel(
-        filename=file.filename,
-        description=description,
-        file_path=file_path,
-        file_size=file_size,
-        file_type=file_type,
-        tags=tags,
-        owner_id=current_user.id
-    )
-    db.add(db_file)
+    api_key = generate_api_key()
+    current_user.api_key = api_key
     db.commit()
-    db.refresh(db_file)
     
-    return db_file
+    return {"api_key": api_key, "message": "API Key generated. Keep it safe!"}
 
+
+# ── 管理员功能 ──────────────────────────────────────
+
+@app.get("/api/admin/users")
+def list_all_users(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """列出所有用户（仅管理员）"""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    users = db.query(User).all()
+    return [
+        {
+            "id": u.id,
+            "username": u.username,
+            "email": u.email,
+            "full_name": u.full_name,
+            "is_admin": u.is_admin,
+            "is_active": u.is_active,
+            "created_at": u.created_at.isoformat() if u.created_at else None
+        }
+        for u in users
+    ]
+
+
+@app.delete("/api/admin/users/{user_id}")
+def delete_user(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """删除用户（仅管理员）"""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    
+    if user.is_admin:
+        raise HTTPException(status_code=400, detail="不能删除管理员")
+    
+    db.delete(user)
+    db.commit()
+    
+    return {"message": "用户已删除"}
+
+
+# ── 文件相关 ──────────────────────────────────────
 
 @app.get("/api/files/public")
 def list_public_files(db: Session = Depends(get_db)):
@@ -140,6 +171,72 @@ def list_files(
     """列出所有文件"""
     files = db.query(FileModel).all()
     return files
+
+
+@app.post("/api/files/upload", response_model=FileResponse)
+async def upload_file(
+    file: UploadFile = File(...),
+    description: str = Form(default=""),
+    tags: str = Form(default=""),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """上传文件"""
+    # 保存文件
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    file_size = os.path.getsize(file_path)
+    file_type = file.content_type or "unknown"
+    
+    db_file = FileModel(
+        filename=file.filename,
+        description=description,
+        file_path=file_path,
+        file_size=file_size,
+        file_type=file_type,
+        tags=tags,
+        owner_id=current_user.id
+    )
+    db.add(db_file)
+    db.commit()
+    db.refresh(db_file)
+    
+    return db_file
+
+
+@app.post("/api/files/upload-by-api-key", response_model=FileResponse)
+async def upload_file_by_api_key(
+    file: UploadFile = File(...),
+    description: str = Form(default=""),
+    tags: str = Form(default=""),
+    current_user: User = Depends(get_user_by_api_key),
+    db: Session = Depends(get_db)
+):
+    """通过 API Key 上传文件（QClaw 专用）"""
+    # 保存文件
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    file_size = os.path.getsize(file_path)
+    file_type = file.content_type or "unknown"
+    
+    db_file = FileModel(
+        filename=file.filename,
+        description=description,
+        file_path=file_path,
+        file_size=file_size,
+        file_type=file_type,
+        tags=tags,
+        owner_id=current_user.id
+    )
+    db.add(db_file)
+    db.commit()
+    db.refresh(db_file)
+    
+    return db_file
 
 
 @app.get("/api/files/{file_id}", response_model=FileResponse)
@@ -183,7 +280,7 @@ def delete_file(
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
     
-    if file.owner_id != current_user.id:
+    if file.owner_id != current_user.id and not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Not authorized")
     
     if os.path.exists(file.file_path):
@@ -229,128 +326,6 @@ def get_file_comments(
     """获取文件的所有评论"""
     comments = db.query(Comment).filter(Comment.file_id == file_id).all()
     return comments
-
-
-# ── API Key 管理（QClaw 集成）────────────────────
-
-@app.post("/api/users/me/api-key")
-def generate_api_key_endpoint(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """生成用户的 API Key（用于 QClaw 集成）"""
-    from .api_key import generate_api_key
-    
-    if current_user.api_key:
-        return {"api_key": current_user.api_key, "message": "You already have an API Key"}
-    
-    api_key = generate_api_key()
-    current_user.api_key = api_key
-    db.commit()
-    
-    return {"api_key": api_key, "message": "API Key generated. Keep it safe!"}
-
-
-# ── 管理员功能 ─────────────────────────────────────
-
-@app.get("/api/admin/users")
-def list_all_users(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """列出所有用户（仅管理员）"""
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="需要管理员权限")
-    
-    users = db.query(User).all()
-    return [
-        {
-            "id": u.id,
-            "username": u.username,
-            "email": u.email,
-            "full_name": u.full_name,
-            "is_admin": u.is_admin,
-            "is_active": u.is_active,
-            "created_at": u.created_at.isoformat()
-        }
-        for u in users
-    ]
-
-
-@app.delete("/api/admin/users/{user_id}")
-def delete_user(
-    user_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """删除用户（仅管理员）"""
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="需要管理员权限")
-    
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-    
-    if user.is_admin:
-        raise HTTPException(status_code=400, detail="不能删除管理员")
-    
-    db.delete(user)
-    db.commit()
-    
-    return {"message": "用户已删除"}
-
-
-@app.post("/api/admin/users/{user_id}/toggle-admin")
-def toggle_admin(
-    user_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """切换用户管理员权限（仅管理员）"""
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="需要管理员权限")
-    
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-    
-    user.is_admin = not user.is_admin
-    db.commit()
-    
-    return {"message": f"用户 {'已成为' if user.is_admin else '已取消'} 管理员"}
-
-
-@app.post("/api/files/upload-by-api-key", response_model=FileResponse)
-async def upload_file_by_api_key(
-    file: UploadFile = File(...),
-    description: str = Form(default=""),
-    tags: str = Form(default=""),
-    current_user: User = Depends(get_user_by_api_key),
-    db: Session = Depends(get_db)
-):
-    """通过 API Key 上传文件（QClaw 专用）"""
-    # 保存文件
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
-    file_size = os.path.getsize(file_path)
-    file_type = file.content_type or "unknown"
-    
-    db_file = FileModel(
-        filename=file.filename,
-        description=description,
-        file_path=file_path,
-        file_size=file_size,
-        file_type=file_type,
-        tags=tags,
-        owner_id=current_user.id
-    )
-    db.add(db_file)
-    db.commit()
-    db.refresh(db_file)
-    
-    return db_file
 
 
 # ── 健康检查 ──────────────────────────────────────
